@@ -5,13 +5,16 @@
   "main": "src/index.ts",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc",
-    "start": "node dist/index.js",
+    "build": "prisma generate && tsc",
+    "start": "prisma migrate deploy && node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
     "seed:demo": "tsx prisma/seed-demo-student.ts"
+  },
+  "engines": {
+    "node": ">=20 <21"
   },
   "dependencies": {
     "@moneypath/shared": "*",

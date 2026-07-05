@@ -5,17 +5,20 @@
     "moduleResolution": "node",
     "lib": ["ES2022"],
     "outDir": "dist",
+    // Pin the emit root to src so the build output is a clean dist/index.js
+    // (not dist/apps/api/src/index.js) — required for `node dist/index.js` on Railway.
+    "rootDir": "./src",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "declaration": false,
-    "sourceMap": true,
-    "baseUrl": ".",
-    "paths": {
-      "@moneypath/shared": ["../../packages/shared/src/index.ts"]
-    }
+    "sourceMap": true
+    // @moneypath/shared resolves via node_modules (npm-workspaces symlink) using its
+    // "types" field. It is TYPES-ONLY and every import is `import type`, so it is fully
+    // erased at compile time — no runtime require, and no path alias needed (which kept
+    // the emit rootDir clean → dist/index.js, required for `node dist/index.js`).
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]

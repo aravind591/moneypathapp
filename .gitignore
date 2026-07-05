@@ -14,6 +14,9 @@ build/
 .next/
 out/
 *.tsbuildinfo
+# Compiled output of the source-only shared package (it ships .ts, not .js)
+packages/shared/src/*.js
+packages/shared/src/*.js.map
 
 # Prisma generated client
 apps/api/node_modules/.prisma/
