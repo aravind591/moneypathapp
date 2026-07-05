@@ -14,7 +14,7 @@
     "seed:demo": "tsx prisma/seed-demo-student.ts"
   },
   "engines": {
-    "node": ">=20 <21"
+    "node": ">=20"
   },
   "dependencies": {
     "@moneypath/shared": "*",
