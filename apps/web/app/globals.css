@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+html,
+body {
+  background-color: #0a0e0c;
+  color: #f2f5f0;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Thin dark scrollbars to match the theme. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #23291f;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Reusable brand button gradient used on primary CTAs. */
+.btn-brand-gradient {
+  background-image: linear-gradient(135deg, #3ee27a, #2bbf63);
+}

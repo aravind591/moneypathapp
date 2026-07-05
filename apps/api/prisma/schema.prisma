@@ -1,0 +1,448 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Stores every person who registers as a student
+model Student {
+  id            String        @id @default(uuid())
+  phone         String        @unique
+  email         String?       @unique
+  fullName      String?
+
+  // Password auth (email + password). Nullable so legacy OTP-only students keep
+  // working — they simply have no passwordHash and can still log in via OTP.
+  passwordHash     String?
+  firstName        String?
+  lastName         String?
+  preferredCountry String?
+
+  // Phone verification: set true once the registration OTP step is completed.
+  phoneVerified    Boolean    @default(false)
+
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  applications  Application[]
+  profile       StudentProfile?
+  documents     Document[]
+
+  @@index([phone]) // Phone is looked up on every OTP login
+  @@index([email]) // Email is the login key for password auth
+}
+
+// Profile data gathered by the 6-step onboarding wizard. One row per student,
+// created lazily on the first wizard save. Every field is nullable because the
+// wizard saves step-by-step (a student may stop after step 1). The flexible,
+// repeated structures (academic grades, test scores, uploaded-doc map) live in
+// Json columns; the queryable/important fields are real columns.
+model StudentProfile {
+  id          String   @id @default(uuid())
+  studentId   String   @unique
+  student     Student  @relation(fields: [studentId], references: [id])
+
+  // Wizard progress: highest step the student has completed (0–6). Lets the UI
+  // resume where they left off.
+  completedStep Int    @default(0)
+
+  // --- Step 1: Basic Information ---
+  dateOfBirth      DateTime?
+  nationality      String?
+  currentCity      String?
+  homeState        String?
+  educationLevel   EducationLevel?
+
+  // --- Step 2: Academic & Official Details ---
+  // School + undergraduate grade blocks and the optional test scores, kept as
+  // Json since their shape is a small, display-only record.
+  // schoolRecords: { tenthPercentage, tenthBoard, twelfthPercentage, twelfthStream }
+  // ugRecords:     { tenthPercentage, tenthBoard, twelfthPercentage, twelfthStream }
+  // testScores:    { ielts?, toefl?, gre?, gmat?, sat?, duolingo? }
+  schoolRecords    Json?
+  ugRecords        Json?
+  testScores       Json?
+
+  // --- Step 3: Study Destination (Country & Course) ---
+  destinationCountry String?
+  intendedCourse     String?
+  intendedUniversity String?
+  intake             String? // e.g. "Fall 2025"
+
+  // --- Step 4: Financial Profile (the student's own income/assets) ---
+  occupation          String?
+  employerName        String?
+  annualIncome        Float?
+  netSalary           Float?
+  yearsEmployed       String? // "Less than 1 yr" | "1-3 years" | "3-10 years" | "10+ years"
+  contactMobile       String?
+  officialEmail       String?
+  existingEmiMonthly  Float?
+  sponsorshipType     SponsorshipType?
+  sponsorshipAmount   String? // free text, e.g. "$8,000 / year"
+
+  // --- Step 5: Collateral / property (co-applicant lives on Application) ---
+  ownsProperty        Boolean?
+  propertyAssetType   String? // Residential / Commercial
+  propertyType        String? // Apartment / Individual house / Open land
+  propertyLocation    String?
+  propertyMarketValue Float?
+  propertyRegistration String? // "Yes, fully registered" | "Partially registered" | "Not yet registered"
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([studentId])
+}
+
+enum EducationLevel {
+  COMPLETED_UG        // Completed Bachelors degree
+  FINAL_YEAR_UG       // Graduating this year
+  COMPLETED_12TH      // Completed higher secondary
+  WORKING_PROFESSIONAL // Currently employed
+}
+
+enum SponsorshipType {
+  NONE      // No sponsorship
+  PARTIAL   // Partial scholarship
+  FULL      // Full sponsor
+}
+
+// Stores admin accounts — created manually, not via public registration
+model Admin {
+  id            String    @id @default(uuid())
+  email         String    @unique
+  passwordHash  String
+  totpSecret    String // 2FA secret key, stored encrypted
+  role          AdminRole @default(CASE_MANAGER)
+  createdAt     DateTime  @default(now())
+
+  auditLogs     AuditLog[]
+}
+
+enum AdminRole {
+  SUPER_ADMIN // Can create other admins, access all settings
+  CASE_MANAGER // Can review and update applications
+  VIEWER // Read-only access
+}
+
+// One loan application per student per course
+model Application {
+  id                String            @id @default(uuid())
+  studentId         String
+  student           Student           @relation(fields: [studentId], references: [id])
+
+  // Loan details
+  loanAmount        Float
+  courseName        String
+  institutionName   String
+  courseDuration    String // e.g. "4 years"
+  courseStartDate   DateTime
+
+  // Sanction & financial details — all nullable; filled by an admin/case manager
+  // once the bank sanctions the loan. Powers the Loan Sanction screen.
+  lenderName          String?
+  sanctionedAmount    Float?
+  interestRate        Float? // annual %, e.g. 10.5
+  processingFeeAmount Float?
+  loanTenureMonths    Int?
+  moratoriumNote      String? // e.g. "Course + 12 months"
+  estimatedEmi        Float? // monthly EMI post-moratorium
+  offerValidUntil     DateTime?
+  sanctionedAt        DateTime?
+
+  // Application state
+  status            ApplicationStatus @default(SUBMITTED)
+  currentStage      LoanStage         @default(SUBMITTED)
+  rejectionReason   String? // Filled when status is REJECTED
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  documents         Document[]
+  stageHistory      StageHistory[]
+  coApplicant       CoApplicant?
+  lenderMatches     ApplicationLenderMatch[]
+  disbursements     Disbursement[]
+  remittances       Remittance[]
+  feePayments       FeePayment[]
+  creditCheck       CreditCheck?
+
+  // One application per student — enforced at the DB level so concurrent creates
+  // can't race past the app-code check. (Also serves as the studentId index.)
+  @@unique([studentId])
+  @@index([status]) // Admin filters by status constantly
+  @@index([currentStage])
+}
+
+// A single disbursement tranche against an application (Disbursement screen).
+model Disbursement {
+  id            String             @id @default(uuid())
+  applicationId String
+  application   Application        @relation(fields: [applicationId], references: [id])
+  ordinal       Int // 1 = first tranche, 2 = second, ...
+  label         String // e.g. "First Disbursement"
+  detail        String? // e.g. "Semester 1" or "Living expense"
+  amountRupees  Float
+  scheduledDate DateTime?
+  releasedDate  DateTime?
+  status        DisbursementStatus @default(SCHEDULED)
+
+  @@index([applicationId])
+}
+
+enum DisbursementStatus {
+  SCHEDULED
+  RELEASED
+}
+
+// A remittance to the beneficiary (e.g. university), with FX detail.
+model Remittance {
+  id             String           @id @default(uuid())
+  applicationId  String
+  application    Application      @relation(fields: [applicationId], references: [id])
+  beneficiary    String // e.g. "University of Toronto"
+  detail         String? // e.g. "Tuition — Semester 1"
+  country        String?
+  currency       String? // foreign currency code e.g. "CAD"
+  amountInr      Float
+  amountForeign  Float?
+  exchangeRate   Float?
+  transferDate   DateTime?
+  transactionRef String?
+  status         RemittanceStatus @default(UPCOMING)
+
+  @@index([applicationId])
+}
+
+enum RemittanceStatus {
+  UPCOMING
+  COMPLETED
+}
+
+// A processing-fee payment against an application (Processing Fee screen). Total fee
+// is Application.processingFeeAmount; these are the individual payments toward it.
+model FeePayment {
+  id             String        @id @default(uuid())
+  applicationId  String
+  application    Application   @relation(fields: [applicationId], references: [id])
+  amountRupees   Float
+  method         String? // e.g. "UPI · GPay", "NEFT · SBI"
+  transactionRef String?
+  status         PaymentStatus @default(PENDING)
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+
+  @@index([applicationId])
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+}
+
+// Credit assessment for an application (Credit Check screen). One per application.
+model CreditCheck {
+  id                 String             @id @default(uuid())
+  applicationId      String             @unique
+  application        Application        @relation(fields: [applicationId], references: [id])
+  overallProgressPct Int                @default(0)
+  status             String             @default("Running") // free-text badge label
+  startedAt          DateTime           @default(now())
+
+  items              CreditCheckItem[]
+  insights           CreditCheckInsight[]
+}
+
+// One row in a credit assessment (e.g. "Credit Score", "Identity Verification").
+model CreditCheckItem {
+  id            String           @id @default(uuid())
+  creditCheckId String
+  creditCheck   CreditCheck      @relation(fields: [creditCheckId], references: [id])
+  party         CreditParty
+  title         String
+  detail        String?
+  state         CreditItemState  @default(UPCOMING)
+  badge         String? // e.g. "Excellent", "Verified", "In Progress"
+
+  @@index([creditCheckId])
+}
+
+enum CreditParty {
+  STUDENT
+  CO_APPLICANT
+}
+
+enum CreditItemState {
+  DONE
+  IN_PROGRESS
+  UPCOMING
+}
+
+// A positive/attention/info insight line on the credit assessment.
+model CreditCheckInsight {
+  id            String          @id @default(uuid())
+  creditCheckId String
+  creditCheck   CreditCheck     @relation(fields: [creditCheckId], references: [id])
+  kind          InsightKind
+  text          String
+
+  @@index([creditCheckId])
+}
+
+enum InsightKind {
+  POSITIVE
+  ATTENTION
+  INFO
+}
+
+// A lender the platform can match applications against (Lenders + Dashboard screens).
+model Lender {
+  id               String   @id @default(uuid())
+  name             String   @unique
+  interestRate     Float // annual %, e.g. 10.5
+  maxAmountRupees  Float
+  processingFeePct Float // e.g. 0.04
+  speedTier        SpeedTier @default(MODERATE)
+  logoUrl          String?
+  active           Boolean   @default(true)
+  createdAt        DateTime  @default(now())
+
+  matches          ApplicationLenderMatch[]
+}
+
+enum SpeedTier {
+  FAST
+  MODERATE
+  SLOW
+}
+
+// Per-application match score for a lender (drives "Top Matched Lenders").
+model ApplicationLenderMatch {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+  lenderId      String
+  lender        Lender      @relation(fields: [lenderId], references: [id])
+  matchPercent  Int // 0–100
+
+  @@unique([applicationId, lenderId])
+  @@index([applicationId])
+}
+
+enum ApplicationStatus {
+  SUBMITTED
+  UNDER_REVIEW
+  SENT_TO_BANK
+  SANCTIONED
+  DISBURSED
+  REJECTED
+  HOLD // Lender put the application on hold pending action (Notifications screen)
+}
+
+enum LoanStage {
+  SUBMITTED // S1 — student submitted, awaiting admin review
+  DOCUMENT_REVIEW // S2 — admin is verifying documents
+  SENT_TO_BANK // S3 — package sent to lender
+  SANCTIONED // S4 — bank approved the loan
+  DISBURSED // S5 — funds released to institution
+}
+
+// Records every stage change for the progress timeline
+model StageHistory {
+  id            String      @id @default(uuid())
+  applicationId String
+  application   Application @relation(fields: [applicationId], references: [id])
+  stage         LoanStage
+  note          String? // Admin can leave a remark e.g. "Sent to SBI on 12 June"
+  changedAt     DateTime    @default(now())
+
+  @@index([applicationId])
+}
+
+// Parent or guardian who is the co-applicant for the loan
+model CoApplicant {
+  id              String      @id @default(uuid())
+  applicationId   String      @unique
+  application     Application @relation(fields: [applicationId], references: [id])
+  fullName        String
+  relationship    String // Father, Mother, Spouse, etc.
+  phone           String
+  email           String?
+  occupation      String
+  monthlyIncome   Float
+}
+
+// Metadata for every uploaded document — actual file lives in Supabase storage
+model Document {
+  id               String       @id @default(uuid())
+
+  // A document belongs to a student directly (uploaded during onboarding / from the
+  // Documents page) and/or to a specific application. Both are nullable so a student
+  // can upload documents before they ever start a loan application — uploading docs
+  // is a first-class action, not gated behind an application. When the student later
+  // applies, their documents can be associated with that application too.
+  studentId        String?
+  student          Student?     @relation(fields: [studentId], references: [id])
+  applicationId    String?
+  application      Application? @relation(fields: [applicationId], references: [id])
+
+  type             DocumentType
+  storagePath      String // Path in Supabase bucket e.g. "students/uuid/aadhaar.pdf"
+  fileName         String // Original file name shown to user
+  fileSizeBytes    Int
+  mimeType         String // "application/pdf" or "image/jpeg" etc.
+  uploadedAt       DateTime     @default(now())
+  isVerified       Boolean      @default(false) // Admin marks as verified
+  verificationNote String? // Admin note if rejected or flagged
+
+  @@index([studentId])
+  @@index([applicationId])
+  @@index([type])
+}
+
+enum DocumentType {
+  // Student documents
+  AADHAAR_CARD
+  PAN_CARD
+  PHOTO
+  TENTH_MARKSHEET
+  TWELFTH_MARKSHEET
+  GRADUATION_MARKSHEET
+  ENTRANCE_SCORE // GRE, CAT, GMAT etc.
+  ADMISSION_LETTER
+  FEE_STRUCTURE
+  BONAFIDE_CERTIFICATE
+
+  // Co-applicant documents
+  CO_AADHAAR_CARD
+  CO_PAN_CARD
+  CO_INCOME_PROOF // Salary slips or ITR
+  CO_BANK_STATEMENT
+  CO_FORM_16
+  RELATIONSHIP_PROOF
+
+  // Bank documents
+  SANCTION_LETTER // Uploaded by admin when bank approves
+  DISBURSEMENT_PROOF // Uploaded by admin when funds released
+}
+
+// Every admin action on a document or application is logged here
+model AuditLog {
+  id            String    @id @default(uuid())
+  adminId       String
+  admin         Admin     @relation(fields: [adminId], references: [id])
+  action        String // e.g. "VIEWED_DOCUMENT", "UPDATED_STAGE", "DOWNLOADED_FILE"
+  targetId      String // ID of the document or application acted on
+  targetType    String // "Document" or "Application"
+  metadata      Json? // Any extra context e.g. { fileName: "aadhaar.pdf" }
+  performedAt   DateTime  @default(now())
+
+  @@index([adminId])
+  @@index([targetId])
+}
