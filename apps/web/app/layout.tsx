@@ -6,6 +6,9 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "MoneyPath — Student Loan Platform",
   description: "Apply for and track your education loan, all in one place.",
+  icons: {
+    icon: "/moneypath-logo.png",
+  },
 };
 
 export default function RootLayout({

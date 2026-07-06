@@ -1,23 +1,31 @@
-// MoneyPath wordmark: green chevron mark + "MONEYPATH" text, matching the mockup.
+// MoneyPath brand logo — renders the wordmark image from /public/moneypath-logo.png
+// (green double-chevron mark + white "MONEYPATH" text on transparent, ~7:1 aspect).
+
+import Image from "next/image";
 
 interface LogoProps {
+  /** Kept for API compatibility; the wordmark PNG already includes the text. */
   showText?: boolean;
   className?: string;
+  /** Rendered height in px (width scales to keep the aspect ratio). Default 30. */
+  height?: number;
 }
 
-export function Logo({ showText = true, className }: LogoProps) {
+// Intrinsic size of public/moneypath-logo.png.
+const NATURAL_WIDTH = 1088;
+const NATURAL_HEIGHT = 157;
+
+export function Logo({ className, height = 30 }: LogoProps) {
+  const width = Math.round((NATURAL_WIDTH / NATURAL_HEIGHT) * height);
   return (
-    <div className={`flex items-center gap-3 ${className ?? ""}`}>
-      {/* Double-chevron mountain mark in brand green. */}
-      <svg width="40" height="32" viewBox="0 0 40 32" fill="none" aria-hidden>
-        <path d="M2 30 L14 6 L22 20 L20 24 L14 14 L8 30 Z" fill="#3ee27a" />
-        <path d="M18 30 L28 10 L38 30 L31 30 L28 23 L25 30 Z" fill="#3ee27a" />
-      </svg>
-      {showText ? (
-        <span className="text-xl font-extrabold tracking-tight text-text-primary">
-          MONEYPATH
-        </span>
-      ) : null}
-    </div>
+    <Image
+      src="/moneypath-logo.png"
+      alt="MoneyPath"
+      width={width}
+      height={height}
+      priority
+      className={className}
+      style={{ height, width: "auto" }}
+    />
   );
 }
